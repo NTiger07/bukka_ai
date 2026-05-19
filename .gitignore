@@ -1,0 +1,5 @@
+.env
+yelp_dataset
+eda_output
+__pycache__
+.DS_Store
