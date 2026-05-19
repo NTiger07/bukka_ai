@@ -192,7 +192,13 @@ def get_loader() -> YelpLoader:
 def init_loader() -> YelpLoader:
     global _loader
     data_dir = os.getenv("YELP_DATA_DIR", "yelp_dataset")
+    # If the path is relative, anchor it to the project root (two levels up from
+    # this file: app/data/yelp_loader.py → app/ → project root)
+    data_path = Path(data_dir)
+    if not data_path.is_absolute():
+        project_root = Path(__file__).resolve().parent.parent.parent
+        data_path = project_root / data_dir
     review_limit = int(os.getenv("REVIEW_SAMPLE_LIMIT", "100000"))
-    _loader = YelpLoader(data_dir=data_dir, review_limit=review_limit)
+    _loader = YelpLoader(data_dir=data_path, review_limit=review_limit)
     _loader.load()
     return _loader

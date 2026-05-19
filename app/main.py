@@ -2,13 +2,23 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
+
+# Make `from app.xxx import ...` work whether you run:
+#   python3 app/main.py          (from project root)
+#   python3 main.py              (from inside app/)
+#   uvicorn app.main:app         (from project root)
+_project_root = Path(__file__).resolve().parent.parent
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-load_dotenv()
+load_dotenv(dotenv_path=_project_root / ".env")
 
 from app.agents import recommend_agent, review_agent
 from app.data.yelp_loader import init_loader
@@ -78,3 +88,9 @@ def recommend(request: RecommendRequest):
     except Exception as e:
         logger.exception("Unexpected error in /recommend")
         raise HTTPException(status_code=500, detail="Recommendation failed") from e
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8001, reload=True)

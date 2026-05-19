@@ -75,7 +75,7 @@ def get_recommendations(
     t0 = time.perf_counter()
     message = client.messages.create(
         model=model,
-        max_tokens=2048,
+        max_tokens=4096,
         system=[
             {
                 "type": "text",
@@ -97,7 +97,7 @@ def get_recommendations(
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
-        logger.error("Failed to parse recommendation JSON: %s", raw[:300])
+        logger.error("Failed to parse recommendation JSON (stop_reason=%s):\n%s", message.stop_reason, raw)
         raise ValueError("LLM returned invalid JSON") from None
 
     persona_summary: str = parsed.get("persona_summary", "")
