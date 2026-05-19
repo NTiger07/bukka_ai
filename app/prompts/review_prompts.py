@@ -1,26 +1,30 @@
 """
 Prompt templates for Task A — review generation.
 
-Nigerian localization notes baked into the system prompt:
-- Value-consciousness: "is this worth my money?" is always a subtext
-- Service sensitivity: how staff treats you matters as much as the food
-- Expressiveness: storytelling cadence — scene-setting, then verdict
-- Social context: often dining with family, colleagues, for occasions
-- Pidgin sprinkles: natural, not forced — matches the persona's tone
-- Comparisons: may reference Nigerian equivalents when relevant
+Nigerian localization is deep here:
+- Regional voice notes (Yoruba / Igbo / Hausa / Edo / general)
+- Naija English sentence patterns (openers, comparisons, verdicts)
+- Nigerian occasion taxonomy (birthday chops, owambe, office hangout, etc.)
+- Curated Nigerian gold-set examples injected before any Yelp dataset examples
 """
 
 from __future__ import annotations
 from app.models import Persona, Business
+from app.prompts.nigerian_voice import (
+    SENTENCE_PATTERNS,
+    get_occasion_context,
+    get_regional_voice,
+)
 
 
 SYSTEM_PROMPT = """\
 You are an AI that writes authentic Yelp reviews on behalf of Nigerian users.
 
-Your job is to embody the given persona completely — their voice, values, and cultural lens — \
-and write a review that reads as if that real person wrote it after visiting the business.
+Your job is to embody the given persona completely — their voice, values, cultural lens, \
+and regional identity — and write a review that reads as if that real person wrote it \
+after visiting the business.
 
-## Nigerian cultural context to weave in naturally
+## Core Nigerian cultural context
 - Value consciousness: Nigerians evaluate whether a place is "worth the price". \
   A ₦5,000 plate equivalent in a US restaurant better deliver.
 - Service sensitivity: warmth and attentiveness from staff carry heavy weight. \
@@ -29,10 +33,18 @@ and write a review that reads as if that real person wrote it after visiting the
   before delivering the verdict. Storytelling is natural.
 - Social lens: dining is often communal — family, colleagues, dates, celebrations. \
   Context shapes the review.
-- Pidgin: use Naija pidgin phrases naturally when the persona's tone calls for it \
-  (e.g., "abeg", "e be like say", "no be small thing", "mehn", "omo", "the thing wey dey happen"). \
+- Pidgin: use Naija pidgin phrases naturally when the persona's tone calls for it. \
   Do NOT force pidgin into formal or blunt personas.
-- Comparisons: if food reminds them of jollof, suya, pepper soup etc., say so.
+- Comparisons: if food reminds them of jollof, suya, pepper soup, pounded yam etc., say so.
+
+## Review length
+Target 80–150 words. Long enough to cover food, service, atmosphere, and value. \
+Short enough to read naturally. Do not pad or repeat yourself.
+
+## Star rating calibration
+The persona's historical average rating is provided. Your star rating MUST be anchored \
+to that baseline — only deviate if the experience clearly warrants it. \
+Do not give extreme scores (1 or 5) unless the bio and visit context strongly support them.
 
 ## Output format
 Respond with a JSON object and nothing else:
@@ -53,6 +65,13 @@ def build_user_prompt(
 ) -> str:
     lines: list[str] = []
 
+    # Regional voice
+    lines.append("## Regional voice for this persona")
+    lines.append(get_regional_voice(persona.region))
+
+    # Sentence patterns
+    lines.append(SENTENCE_PATTERNS)
+
     # Persona block
     lines.append("## Persona")
     lines.append(f"Name: {persona.name}")
@@ -60,11 +79,23 @@ def build_user_prompt(
         lines.append(f"Age: {persona.age}")
     if persona.city:
         lines.append(f"From: {persona.city}")
+    if persona.region:
+        lines.append(f"Regional background: {persona.region.title()}")
     lines.append(f"Tone: {persona.tone}")
     lines.append(f"Historical avg rating they give: {persona.avg_star_rating:.1f} stars")
+    lines.append(
+        f"Star calibration: stay within ±1 star of {persona.avg_star_rating:.1f} "
+        f"unless this visit was clearly exceptional or terrible."
+    )
     if persona.food_preferences:
         lines.append(f"Food preferences: {', '.join(persona.food_preferences)}")
-    lines.append(f"Bio: {persona.bio}")
+    if persona.bio:
+        lines.append(f"Bio: {persona.bio}")
+    else:
+        lines.append(
+            "Bio: A typical Nigerian user with no detailed history — "
+            "infer reasonable preferences from their rating average and tone."
+        )
 
     # Business block
     lines.append("\n## Business being reviewed")
@@ -88,21 +119,30 @@ def build_user_prompt(
         if attr_parts:
             lines.append("Attributes: " + " | ".join(attr_parts))
 
-    # Visit context
+    # Visit context — enrich with occasion taxonomy if it matches
     if context:
         lines.append(f"\n## Visit context\n{context}")
+        occasion_frame = get_occasion_context(context)
+        if occasion_frame:
+            lines.append(f"\nOccasion framing: {occasion_frame}")
 
-    # Few-shot examples
+    # Nigerian gold examples (always first)
     if examples:
-        lines.append("\n## Real reviews from similar businesses (for style reference only)")
-        lines.append("Do NOT copy these — use them to calibrate the voice and detail level.")
+        lines.append("\n## Authentic Nigerian review examples (style reference)")
+        lines.append(
+            "These are real Nigerian-voice reviews. Use them to calibrate rhythm, "
+            "idiom, and cultural framing — do NOT copy the content."
+        )
         for i, ex in enumerate(examples, 1):
-            preview = ex["text"][:400].replace("\n", " ")
-            lines.append(f"\nExample {i} (★{ex['stars']}): {preview}{'...' if len(ex['text']) > 400 else ''}")
+            source = "Nigerian gold" if ex.get("is_gold") else f"Yelp ★{ex['stars']}"
+            preview = ex["text"][:450].replace("\n", " ")
+            suffix = "..." if len(ex["text"]) > 450 else ""
+            lines.append(f"\nExample {i} ({source}): {preview}{suffix}")
 
     lines.append(
         "\n## Task\nWrite a review that this persona would leave for this business. "
-        "Make it feel completely authentic — not generic. "
+        "Apply the regional voice notes and sentence patterns naturally — not all at once. "
+        "Make it feel completely authentic, not generic or performative. "
         "Return ONLY valid JSON matching the specified format."
     )
 

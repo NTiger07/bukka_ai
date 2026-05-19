@@ -9,10 +9,11 @@ class Persona(BaseModel):
     name: str
     age: int | None = None
     city: str | None = None
+    region: Literal["yoruba", "igbo", "hausa", "edo", "general"] | None = None
     tone: Literal["expressive", "blunt", "formal", "casual", "sarcastic"] = "casual"
     food_preferences: list[str] = Field(default_factory=list)
     avg_star_rating: float = Field(default=3.5, ge=1.0, le=5.0)
-    bio: str
+    bio: str = ""  # empty = cold-start user
 
 
 # ── Task A – Review Generation ────────────────────────────────────────────────
@@ -49,17 +50,29 @@ class ReviewResponse(BaseModel):
 
 # ── Task B – Recommendations ──────────────────────────────────────────────────
 
+class HistoryItem(BaseModel):
+    """A single past visit the user made — source-domain signal for cross-domain inference."""
+    business_name: str
+    category: str                          # e.g. "Restaurants, Chinese"
+    stars: int = Field(ge=1, le=5)         # what the user actually rated it
+    notes: str | None = None               # optional: "loved the bold spice", "service was cold"
+
+
 class RecommendFilters(BaseModel):
     city: str | None = None
     state: str | None = None
     categories: list[str] = Field(default_factory=list)
     min_stars: float = Field(default=3.0, ge=1.0, le=5.0)
-    max_results: int = Field(default=5, ge=1, le=10)
+    max_results: int = Field(default=10, ge=1, le=10)
+    # Cross-domain: set this to recommend in a different domain than the user's history
+    target_domain: str | None = None       # e.g. "Spas", "Nightlife", "Shopping", "Arts & Entertainment"
 
 
 class RecommendRequest(BaseModel):
     persona: Persona
     filters: RecommendFilters = Field(default_factory=RecommendFilters)
+    # Past visits the user made — used for cross-domain preference inference
+    history: list[HistoryItem] = Field(default_factory=list)
 
 
 class RecommendedBusiness(BaseModel):
@@ -77,4 +90,5 @@ class RecommendedBusiness(BaseModel):
 class RecommendResponse(BaseModel):
     recommendations: list[RecommendedBusiness]
     persona_summary: str
+    cross_domain_inference: str | None = None  # filled when target_domain is set
     generation_time_ms: int

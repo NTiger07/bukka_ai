@@ -104,15 +104,18 @@ Quick liveness check.
 ---
 
 ### `POST /recommend`
-**Task B.** Given a user persona, return a ranked list of personalized business recommendations.
+**Task B.** Given a user persona (+ optional history), return personalised recommendations.
 
-**Request body**
+Supports two modes — same-domain and cross-domain — selected automatically based on whether `filters.target_domain` is set.
+
+**Request body — standard mode**
 ```json
 {
   "persona": {
     "name": "Emeka",
     "age": 34,
     "city": "Philadelphia",
+    "region": "igbo",
     "tone": "blunt",
     "food_preferences": ["suya", "grilled meats", "seafood"],
     "avg_star_rating": 4.2,
@@ -123,19 +126,48 @@ Quick liveness check.
     "state": "PA",
     "categories": ["Restaurants", "Nightlife"],
     "min_stars": 3.5,
+    "max_results": 10
+  },
+  "history": []
+}
+```
+
+**Request body — cross-domain mode**
+
+Set `filters.target_domain` to a different category than the user's history. The agent infers preference signals from `history` and applies them to the target domain.
+
+```json
+{
+  "persona": {
+    "name": "Emeka",
+    "tone": "blunt",
+    "bio": "Busy professional who values intensity and quality over price."
+  },
+  "filters": {
+    "city": "Philadelphia",
+    "state": "PA",
+    "target_domain": "Spas & Beauty",
+    "min_stars": 3.5,
     "max_results": 5
-  }
+  },
+  "history": [
+    { "business_name": "Han Dynasty", "category": "Chinese, Szechuan", "stars": 5, "notes": "loved the intense heat" },
+    { "business_name": "Zahav", "category": "Israeli, Mediterranean", "stars": 4, "notes": "grilled meats, bold flavors" },
+    { "business_name": "Applebees", "category": "American", "stars": 2, "notes": "bland and forgettable" }
+  ]
 }
 ```
 
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|
-| `persona` | object | yes | |
+| `persona` | object | yes | See [Persona Object](#persona-object) |
 | `filters.city` | string | no | Filter by city |
 | `filters.state` | string | no | 2-letter state code |
-| `filters.categories` | array of strings | no | Subset of Yelp categories |
+| `filters.categories` | array | no | Leave empty for cross-category diversity |
+| `filters.target_domain` | string | no | Triggers cross-domain mode. e.g. `"Spas & Beauty"`, `"Arts & Entertainment"`, `"Shopping"` |
 | `filters.min_stars` | float | no | Default `3.0` |
-| `filters.max_results` | integer | no | Default `5`, max `10` |
+| `filters.max_results` | integer | no | Default `10`, max `10` |
+| `history` | array | no | Past visits — each needs `business_name`, `category`, `stars`. `notes` optional. |
 
 **Response**
 ```json
@@ -144,36 +176,27 @@ Quick liveness check.
     {
       "rank": 1,
       "business_id": "abc123",
-      "name": "Han Dynasty",
-      "category": "Chinese, Szechuan",
+      "name": "Rescue Rituals Spa",
+      "category": "Spas, Beauty & Spas",
       "city": "Philadelphia",
-      "stars": 4.5,
-      "review_count": 1842,
-      "reason": "High-heat Szechuan spice matches your love for bold flavours — no dulling it down here.",
-      "match_score": 0.94
-    },
-    {
-      "rank": 2,
-      "business_id": "def456",
-      "name": "Zahav",
-      "category": "Israeli, Mediterranean",
-      "city": "Philadelphia",
-      "stars": 4.7,
-      "review_count": 2100,
-      "reason": "Flame-grilled meats with a strong cultural identity — similar vibe to the smoky street food you enjoy.",
-      "match_score": 0.89
+      "stars": 4.6,
+      "review_count": 312,
+      "reason": "Emeka's 5-star Szechuan habit signals a preference for bold intensity over gentle comfort — this spa's deep tissue focus mirrors that same unapologetic strength.",
+      "match_score": 0.91
     }
   ],
-  "persona_summary": "Emeka is a no-nonsense professional who gravitates toward bold, well-executed food over ambience.",
-  "generation_time_ms": 2340
+  "persona_summary": "Emeka is a high-standards professional who gravitates toward intense, well-executed experiences.",
+  "cross_domain_inference": "User consistently rates high-intensity, authentic experiences (Szechuan heat, grilled meats) and punishes blandness (2★ Applebees). In the spa domain: bold intensity → deep tissue over Swedish; authenticity → specialist boutiques over chain spas; value-conscious → mid-range with strong reviews.",
+  "generation_time_ms": 2840
 }
 ```
 
 | Field | Type | Notes |
 |-------|------|-------|
 | `recommendations` | array | Ranked list |
-| `recommendations[].reason` | string | LLM-generated explanation (display this prominently) |
+| `recommendations[].reason` | string | References cross-domain inference directly when in cross-domain mode |
 | `recommendations[].match_score` | float | 0–1 relevance score |
+| `cross_domain_inference` | string \| null | Only present in cross-domain mode — show this to the user, it explains the reasoning |
 | `persona_summary` | string | Agent's read of the persona — nice to show in the UI |
 | `generation_time_ms` | integer | |
 
@@ -188,6 +211,7 @@ Full schema for the `persona` field used in both endpoints.
   "name": "string — display name",
   "age": "integer — optional",
   "city": "string — home city",
+  "region": "yoruba | igbo | hausa | edo | general — Nigerian regional background, shapes voice",
   "tone": "expressive | blunt | formal | casual | sarcastic",
   "food_preferences": ["array of strings — optional"],
   "avg_star_rating": "float 1.0–5.0 — user's historical average rating",
@@ -195,7 +219,7 @@ Full schema for the `persona` field used in both endpoints.
 }
 ```
 
-Only `name` and `bio` are strictly required. Everything else enriches the generation.
+Only `name` is strictly required. `bio` empty = cold-start mode. `region` significantly improves the Nigerian voice quality.
 
 ---
 

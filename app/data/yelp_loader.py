@@ -66,8 +66,13 @@ class YelpLoader:
         categories: list[str] | None = None,
         min_stars: float = 3.0,
         limit: int = 20,
+        diverse: bool = False,
     ) -> list[dict]:
-        """Filter and rank businesses for the recommendation pipeline."""
+        """Filter and rank businesses for the recommendation pipeline.
+
+        When diverse=True and no category filter is set, results are spread
+        across primary category groups (cross-domain mode).
+        """
         df = self.businesses.copy()
 
         if city:
@@ -90,7 +95,21 @@ class YelpLoader:
         # Quality score: stars weighted by review popularity (log scale)
         df = df.copy()
         df["_score"] = df["stars"] * np.log1p(df["review_count"].clip(lower=0))
-        df = df.sort_values("_score", ascending=False).head(limit)
+
+        if diverse and categories is None:
+            # Cross-domain: group by primary category, take top 3 per group so
+            # the candidate pool spans multiple domains (food, nightlife, spas…)
+            df["_primary_cat"] = (
+                df["categories"].fillna("Other").str.split(",").str[0].str.strip()
+            )
+            df = (
+                df.groupby("_primary_cat", group_keys=False)
+                .apply(lambda g: g.nlargest(3, "_score"))
+                .sort_values("_score", ascending=False)
+                .head(limit)
+            )
+        else:
+            df = df.sort_values("_score", ascending=False).head(limit)
 
         return df[
             ["business_id", "name", "categories", "city", "state", "stars", "review_count"]

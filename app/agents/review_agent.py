@@ -17,6 +17,7 @@ import time
 
 import anthropic
 
+from app.data.nigerian_examples import get_examples_by_region, get_examples_by_stars
 from app.data.yelp_loader import get_loader
 from app.models import Business, Persona, ReviewResponse
 from app.prompts import review_prompts
@@ -40,13 +41,21 @@ def generate_review(
 ) -> ReviewResponse:
     loader = get_loader()
 
-    # Find business in dataset for few-shot examples
+    # Nigerian gold examples — 2 matched by region+tone, always injected first
+    gold = get_examples_by_region(persona.region, persona.tone, n=2)
+    for ex in gold:
+        ex["is_gold"] = True
+
+    # Yelp dataset examples — business-level first, then category fallback
     business_id = loader.find_business_id(business.name, business.city)
-    examples = loader.get_review_examples(
+    dataset_examples = loader.get_review_examples(
         business_id=business_id,
         categories=business.category,
-        n=3,
+        n=2,
     )
+
+    # Gold first so the model anchors on Nigerian voice before seeing US examples
+    examples = gold + dataset_examples
 
     user_prompt = review_prompts.build_user_prompt(
         persona=persona,

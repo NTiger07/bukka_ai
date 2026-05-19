@@ -82,6 +82,7 @@ def recommend(request: RecommendRequest):
         return recommend_agent.get_recommendations(
             persona=request.persona,
             filters=request.filters,
+            history=request.history,
         )
     except ValueError as e:
         raise HTTPException(status_code=500, detail=str(e))
