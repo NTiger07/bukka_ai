@@ -1,15 +1,22 @@
 """
 Loads the Yelp dataset into memory once at startup.
 
-Businesses (~150k) are loaded in full — they're the backbone of Task B.
-Reviews are streamed up to REVIEW_SAMPLE_LIMIT and indexed by business_id
-so Task A can pull real few-shot examples for any business in the dataset.
-A secondary category index lets us fall back to category-level examples when
-the requested business isn't in the dataset.
+Production / Vercel path:
+  Reads from pre-processed slim files committed to the repo:
+    app/data/businesses.csv        (~10 MB, 7 fields, open businesses only)
+    app/data/review_examples.json  (~12 MB, sampled few-shot examples)
+
+Local development path (fallback):
+  If the slim files are absent, falls back to the full raw dataset at
+  YELP_DATA_DIR (default: yelp_dataset/).  This path is never deployed.
+
+Generate the slim files once with:
+    python3 scripts/prepare_dataset.py
 """
 
 from __future__ import annotations
 
+import csv
 import json
 import logging
 import os
@@ -20,6 +27,11 @@ import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+# Slim files live next to this module inside app/data/
+_MODULE_DIR = Path(__file__).resolve().parent
+SLIM_BIZ_PATH = _MODULE_DIR / "businesses.csv"
+SLIM_REV_PATH = _MODULE_DIR / "review_examples.json"
 
 
 def _stream_ndjson(path: Path, limit: int | None = None):
@@ -41,18 +53,40 @@ class YelpLoader:
         self.review_limit = review_limit
 
         self.businesses: pd.DataFrame = pd.DataFrame()
-        # business_id → list of {"stars": int, "text": str}
         self.reviews_by_business: dict[str, list[dict]] = defaultdict(list)
-        # category → list of {"stars": int, "text": str}
         self.reviews_by_category: dict[str, list[dict]] = defaultdict(list)
 
     # ── public ────────────────────────────────────────────────────────────────
 
     def load(self):
-        logger.info("Loading Yelp businesses...")
-        self._load_businesses()
-        logger.info("Indexing Yelp reviews (limit=%d)...", self.review_limit)
-        self._index_reviews()
+        if SLIM_BIZ_PATH.exists():
+            logger.info("Loading slim businesses from %s ...", SLIM_BIZ_PATH)
+            self._load_slim_businesses()
+        else:
+            biz_path = self.data_dir / "yelp_academic_dataset_business.json"
+            if not biz_path.exists():
+                logger.warning(
+                    "No dataset found (tried %s and %s). "
+                    "Run scripts/prepare_dataset.py to generate slim files. "
+                    "Task B will return no candidates.",
+                    SLIM_BIZ_PATH,
+                    biz_path,
+                )
+                return
+            logger.info("Loading full businesses from %s ...", biz_path)
+            self._load_businesses()
+
+        if SLIM_REV_PATH.exists():
+            logger.info("Loading slim review examples from %s ...", SLIM_REV_PATH)
+            self._load_slim_reviews()
+        else:
+            rev_path = self.data_dir / "yelp_academic_dataset_review.json"
+            if rev_path.exists():
+                logger.info("Indexing full reviews (limit=%d) ...", self.review_limit)
+                self._index_reviews()
+            else:
+                logger.info("No review examples file found — Task A will use gold examples only.")
+
         logger.info(
             "YelpLoader ready: %d businesses, %d businesses with review examples",
             len(self.businesses),
@@ -68,11 +102,9 @@ class YelpLoader:
         limit: int = 20,
         diverse: bool = False,
     ) -> list[dict]:
-        """Filter and rank businesses for the recommendation pipeline.
+        if self.businesses.empty:
+            return []
 
-        When diverse=True and no category filter is set, results are spread
-        across primary category groups (cross-domain mode).
-        """
         df = self.businesses.copy()
 
         if city:
@@ -83,22 +115,17 @@ class YelpLoader:
             df = df[df["stars"] >= min_stars]
         if categories:
             mask = df["categories"].fillna("").apply(
-                lambda cats: any(
-                    c.lower() in cats.lower() for c in categories
-                )
+                lambda cats: any(c.lower() in cats.lower() for c in categories)
             )
             df = df[mask]
 
         if df.empty:
             return []
 
-        # Quality score: stars weighted by review popularity (log scale)
         df = df.copy()
         df["_score"] = df["stars"] * np.log1p(df["review_count"].clip(lower=0))
 
         if diverse and categories is None:
-            # Cross-domain: group by primary category, take top 3 per group so
-            # the candidate pool spans multiple domains (food, nightlife, spas…)
             df["_primary_cat"] = (
                 df["categories"].fillna("Other").str.split(",").str[0].str.strip()
             )
@@ -118,23 +145,18 @@ class YelpLoader:
     def get_review_examples(
         self, business_id: str | None, categories: str | None, n: int = 3
     ) -> list[dict]:
-        """
-        Return up to n review examples for few-shot prompting.
-        Priority: exact business match → category match → empty list.
-        """
         if business_id and business_id in self.reviews_by_business:
             return self.reviews_by_business[business_id][:n]
-
         if categories:
             for cat in categories.split(", "):
                 cat = cat.strip()
                 if cat in self.reviews_by_category:
                     return self.reviews_by_category[cat][:n]
-
         return []
 
     def find_business_id(self, name: str, city: str | None = None) -> str | None:
-        """Fuzzy-ish lookup: exact name match first, then case-insensitive."""
+        if self.businesses.empty:
+            return None
         df = self.businesses
         match = df[df["name"] == name]
         if city:
@@ -143,15 +165,31 @@ class YelpLoader:
                 return city_match.iloc[0]["business_id"]
         if not match.empty:
             return match.iloc[0]["business_id"]
-
-        # Case-insensitive fallback
         match = df[df["name"].str.lower() == name.lower()]
         if not match.empty:
             return match.iloc[0]["business_id"]
-
         return None
 
-    # ── private ───────────────────────────────────────────────────────────────
+    # ── slim loaders (production) ─────────────────────────────────────────────
+
+    def _load_slim_businesses(self):
+        rows = []
+        with open(SLIM_BIZ_PATH, encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                row["stars"] = float(row["stars"])
+                row["review_count"] = int(row["review_count"])
+                rows.append(row)
+        self.businesses = pd.DataFrame(rows)
+
+    def _load_slim_reviews(self):
+        with open(SLIM_REV_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+        for bid, examples in data.get("by_biz", {}).items():
+            self.reviews_by_business[bid] = examples
+        for cat, examples in data.get("by_cat", {}).items():
+            self.reviews_by_category[cat] = examples
+
+    # ── full dataset loaders (local dev fallback) ─────────────────────────────
 
     def _load_businesses(self):
         path = self.data_dir / "yelp_academic_dataset_business.json"
@@ -182,12 +220,10 @@ class YelpLoader:
             if not text:
                 continue
 
-            # Business-level index
             if biz_caps[bid] < self.MAX_EXAMPLES_PER_BUSINESS:
                 self.reviews_by_business[bid].append({"stars": stars, "text": text})
                 biz_caps[bid] += 1
 
-            # Category-level index
             cats_str = biz_categories.get(bid, "")
             for cat in cats_str.split(", "):
                 cat = cat.strip()
@@ -204,15 +240,14 @@ _loader: YelpLoader | None = None
 def get_loader() -> YelpLoader:
     global _loader
     if _loader is None:
-        raise RuntimeError("YelpLoader not initialised — call init_loader() at startup")
+        logger.warning("get_loader() called before init_loader() — creating stub loader")
+        _loader = YelpLoader(data_dir=Path("."), review_limit=0)
     return _loader
 
 
 def init_loader() -> YelpLoader:
     global _loader
     data_dir = os.getenv("YELP_DATA_DIR", "yelp_dataset")
-    # If the path is relative, anchor it to the project root (two levels up from
-    # this file: app/data/yelp_loader.py → app/ → project root)
     data_path = Path(data_dir)
     if not data_path.is_absolute():
         project_root = Path(__file__).resolve().parent.parent.parent

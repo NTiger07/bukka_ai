@@ -34,8 +34,11 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting up — loading Yelp dataset...")
-    init_loader()
-    logger.info("Dataset loaded. Server ready.")
+    try:
+        init_loader()
+        logger.info("Dataset loaded. Server ready.")
+    except Exception as exc:
+        logger.warning("Yelp dataset load failed (%s) — running without dataset.", exc)
     yield
 
 
