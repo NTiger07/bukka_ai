@@ -1,5 +1,4 @@
-# Frontend Integration Guide
-**DSN x BCT LLM Agent Hackathon — Yelp AI Agents**
+# Bukka AI — Frontend Integration Guide
 
 ---
 
@@ -19,7 +18,7 @@ Both agents have a Nigerian cultural localisation layer — tone, phrasing, and 
 ## Base URL
 
 ```
-https://user-reviews-agent.vercel.app/
+https://bukka-ai.vercel.app/
 ```
 
 All endpoints return `application/json`. All request bodies are `application/json`.
@@ -437,4 +436,4 @@ console.log(data.recommendations);         // cocktail bars, not clubs
 
 ---
 
-*Backend: Favour | Frontend integration questions → ping on the team channel*
+*Bukka AI — Backend: Favour | Frontend integration questions → ping on the team channel*

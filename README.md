@@ -1,6 +1,7 @@
-# DSN x BCT LLM Agent Hackathon — Team Sentinel
+# Bukka AI
 
 Two FastAPI AI agents built on the Yelp Open Dataset with deep Nigerian cultural localisation.
+Built for the DSN x BCT LLM Agent Hackathon — Team Sentinel.
 
 - **Task A** (`POST /generate-review`) — Given a Nigerian user persona and a business, generate a realistic Yelp-style review with star rating
 - **Task B** (`POST /recommend`) — Given a persona and optional visit history, return a ranked list of personalised business recommendations
@@ -10,7 +11,7 @@ Two FastAPI AI agents built on the Yelp Open Dataset with deep Nigerian cultural
 ## Project Structure
 
 ```
-user_reviews_agent/
+bukka_ai/
 ├── app/
 │   ├── main.py                        # FastAPI app, lifespan startup, both endpoints
 │   ├── models.py                      # Pydantic v2 request/response schemas
@@ -49,7 +50,7 @@ user_reviews_agent/
 
 ```bash
 git clone <repo-url>
-cd user_reviews_agent
+cd bukka_ai
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
@@ -290,8 +291,8 @@ The Yelp dataset files must be bundled with the deployment or mounted via a stor
 
 ## Papers
 
-- `task_a_paper.tex` — Full technical paper for Task A (review generation)
-- `task_b_paper.tex` — Full technical paper for Task B (recommendation system)
+- [task_a_paper.tex](task_a_paper.tex) — Full technical paper for Task A (review generation)
+- [task_b_paper.tex](task_b_paper.tex) — Full technical paper for Task B (recommendation system)
 
 Compile with `pdflatex` (requires `tikz`, `booktabs`, `tabularx`).
 

@@ -43,8 +43,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Yelp AI Agents",
-    description="Task A: review generation | Task B: personalized recommendations",
+    title="Bukka AI",
+    description="Bukka AI: Task A — review generation | Task B — personalized recommendations",
     version="1.0.0",
     lifespan=lifespan,
 )
