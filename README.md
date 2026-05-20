@@ -66,12 +66,26 @@ cp .env.example .env
 #   CLAUDE_MODEL        — Claude model ID (default: claude-haiku-4-5-20251001)
 ```
 
-### 3. Download the Yelp dataset
+### 3. Prepare the dataset
 
-Get the [Yelp Open Dataset](https://www.yelp.com/dataset) and place the JSON files in `yelp_dataset/`. The server needs at minimum:
+The app uses two slim files committed to the repo that are generated from the full Yelp dataset:
 
-- `yelp_academic_dataset_business.json`
-- `yelp_academic_dataset_review.json`
+| File | Size | Purpose |
+|---|---|---|
+| `app/data/businesses.csv` | ~10 MB | Task B candidate retrieval |
+| `app/data/review_examples.json` | ~12 MB | Task A few-shot examples |
+
+**Production / Vercel (default):** `YelpLoader` reads these slim files automatically at startup — no raw Yelp data needed.
+
+**Local development (fallback):** If the slim files are absent, the loader falls back to the full raw Yelp JSON files at `YELP_DATA_DIR` (default: `yelp_dataset/`). Download the [Yelp Open Dataset](https://www.yelp.com/dataset), place the files there, and the server will load directly from them.
+
+To regenerate the slim files from a fresh Yelp download (run once from the project root):
+
+```bash
+python3 scripts/prepare_dataset.py
+```
+
+This script streams `yelp_academic_dataset_business.json` and `yelp_academic_dataset_review.json`, filters to open businesses with ≥10 reviews, and writes the two slim output files. Commit the results — they replace the need to ship the full multi-GB dataset.
 
 ### 4. Run the server
 
