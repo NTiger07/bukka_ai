@@ -19,7 +19,7 @@ Both agents have a Nigerian cultural localisation layer — tone, phrasing, and 
 ## Base URL
 
 ```
-http://localhost:8001
+https://user-reviews-agent.vercel.app/
 ```
 
 All endpoints return `application/json`. All request bodies are `application/json`.
