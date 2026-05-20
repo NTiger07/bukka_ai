@@ -1,0 +1,19 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "app/main.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "app/main.py"
+    }
+  ],
+  "env": {
+    "CLAUDE_MODEL": "claude-haiku-4-5-20251001",
+    "REVIEW_SAMPLE_LIMIT": "10000"
+  }
+}

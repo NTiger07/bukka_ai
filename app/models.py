@@ -71,8 +71,11 @@ class RecommendFilters(BaseModel):
 class RecommendRequest(BaseModel):
     persona: Persona
     filters: RecommendFilters = Field(default_factory=RecommendFilters)
-    # Past visits the user made — used for cross-domain preference inference
     history: list[HistoryItem] = Field(default_factory=list)
+    use_agent_pipeline: bool = Field(
+        default=False,
+        description="True = three-agent pipeline (slower, richer reasoning). False = single-agent (faster).",
+    )
 
 
 class RecommendedBusiness(BaseModel):
@@ -90,5 +93,6 @@ class RecommendedBusiness(BaseModel):
 class RecommendResponse(BaseModel):
     recommendations: list[RecommendedBusiness]
     persona_summary: str
-    cross_domain_inference: str | None = None  # filled when target_domain is set
+    preference_profile: str | None = None      # Agent 1 output — what the user values
+    cross_domain_inference: str | None = None  # Agent 2 output — how signals translate
     generation_time_ms: int

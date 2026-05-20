@@ -4,3 +4,5 @@ eda_output
 __pycache__
 .DS_Store
 project_hackathon.md
+memory
+.claude

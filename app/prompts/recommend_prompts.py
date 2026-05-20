@@ -1,217 +1,319 @@
 """
-Prompt templates for Task B — personalized recommendations.
+Prompt templates for Task B recommendations.
 
-Two prompt paths:
-- build_user_prompt()        — standard same-domain recommendations
-- build_cross_domain_prompt() — explicit 2-step reasoning: infer signals from
-                                history, translate to target domain, rank
+Two modes (toggled by use_agent_pipeline in the request):
+
+FAST PATH (single-agent):
+  build_user_prompt()         — standard same-domain
+  build_cross_domain_prompt() — cross-domain with inline 3-step reasoning
+
+PIPELINE PATH (three-agent):
+  Agent 1 — Preference Analyst:  persona + history  →  preference profile
+  Agent 2 — Domain Translator:   profile + target   →  translated signals (cross-domain only)
+  Agent 3 — Ranker:              profile + candidates →  ranked list
 """
 
 from __future__ import annotations
 from app.models import HistoryItem, Persona
 
 
-SYSTEM_PROMPT = """\
-You are a personalized business recommendation agent for Nigerian users.
+# ── Agent 1: Preference Analyst ───────────────────────────────────────────────
 
-Your job: given a user persona and a shortlist of real businesses, rank the businesses \
-that best match this persona and explain WHY in a culturally resonant way.
+PREFERENCE_ANALYST_SYSTEM_PROMPT = """\
+You are a user preference analyst for a Nigerian recommendation platform.
 
-## What matters to Nigerian users (weight these heavily)
-- Value for money — "is this place worth it?"
-- Bold, flavourful experiences — bland or mediocre is a dealbreaker
-- Attentive, warm service — being made to feel welcome matters
-- Atmosphere that fits the occasion (casual hangout vs. special occasion)
-- Similarity to bold West African sensibilities (intensity, warmth, richness)
+Your job: read a user's persona and their past visit history, then produce a concise, \
+structured profile of what this specific person truly values — not what their demographic \
+"should" value.
 
-## Cold-start users
-If the persona has no bio and no stated preferences, do NOT fabricate tastes. \
-Instead, rank by: (1) general quality and popularity, (2) value for money, \
-(3) variety across categories. Explain recommendations in terms of why \
-any Nigerian visitor would enjoy them, not assumed personal preferences.
+Focus on:
+- Patterns across their rated businesses (what high-starred places have in common)
+- Patterns in their low-rated places (what they consistently dislike)
+- Price sensitivity (inferred from avg_star_rating and bio)
+- Experience priorities (atmosphere, service, authenticity, boldness, value-for-money)
+- Any Nigerian cultural signals in their bio or preferences
 
-## Cross-domain recommendations
-When candidates span multiple business types (restaurants, bars, spas, shopping, \
-entertainment), recommend the best across ALL domains — not just food. \
-A great recommendation for a stressed professional might be a spa, not another restaurant.
-
-## Output format
-Respond with a JSON object and nothing else:
+Output ONLY valid JSON — no prose, no markdown:
 {
-  "persona_summary": "<2-sentence read of this persona's identity>",
-  "ranked": [
-    {
-      "business_id": "<id>",
-      "rank": <1-based integer>,
-      "reason": "<1-2 sentences: why THIS persona will love THIS place, culturally specific>",
-      "match_score": <float 0.0-1.0>
-    }
-  ]
+  "preferred_attributes": ["<2-5 specific things they love>"],
+  "avoided_attributes": ["<2-5 specific things they hate or avoid>"],
+  "price_sensitivity": "budget" | "mid-range" | "premium",
+  "experience_priorities": ["<ordered list of what matters most to them>"],
+  "cultural_notes": "<1-2 sentences on Nigerian cultural context for this person>",
+  "summary": "<2 sentences: who is this person and what experience are they looking for>"
 }
-
-Rank ALL businesses provided. The `reason` must be specific to the persona, not generic filler.
 """
 
-CROSS_DOMAIN_SYSTEM_PROMPT = """\
-You are a cross-domain recommendation agent for Nigerian users.
 
-You receive a user's visit history from one or more domains (e.g., restaurants, bars) \
-and a target domain they want recommendations for (e.g., spas, shopping, entertainment). \
-Your job is to reason explicitly about what the user's history reveals about their deeper \
-preferences, then translate those signals into the target domain.
+def build_preference_analyst_prompt(
+    persona: Persona,
+    history: list[HistoryItem],
+) -> str:
+    lines: list[str] = ["## Persona"]
+    lines.append(f"Name: {persona.name}")
+    if persona.age:
+        lines.append(f"Age: {persona.age}")
+    if persona.city:
+        lines.append(f"Home city: {persona.city}")
+    if persona.region:
+        lines.append(f"Region/background: {persona.region}")
+    lines.append(f"Tone: {persona.tone}")
+    lines.append(f"Avg star rating they give: {persona.avg_star_rating:.1f}/5.0")
+    if persona.food_preferences:
+        lines.append(f"Food preferences: {', '.join(persona.food_preferences)}")
+    if persona.bio:
+        lines.append(f"Bio: {persona.bio}")
 
-## Reasoning process you MUST follow
-Step 1 — Extract signals: What does this user consistently value? What do they avoid? \
-Look at star patterns, categories they rate highly, and any notes they left.
+    lines.append("\n## Visit History")
+    if history:
+        lines.append("Past visits this user has rated:")
+        for item in history:
+            line = f"- {item.business_name} [{item.category}] → ★{item.stars}/5"
+            if item.notes:
+                line += f': "{item.notes}"'
+            lines.append(line)
+    else:
+        lines.append("(No visit history — infer entirely from persona bio and stated preferences)")
 
-Step 2 — Translate to target domain: How do those signals map to the target domain? \
-Be explicit. Example: "Values bold intensity in food → likely wants deep tissue massage, \
-not a gentle Swedish; hates bland → avoid generic chain spas."
+    lines.append(
+        "\n## Task\nAnalyse the persona and history above. "
+        "Identify the genuine preference signals. "
+        "Return ONLY valid JSON matching the specified format."
+    )
+    return "\n".join(lines)
 
-Step 3 — Rank candidates using the translated signals.
 
-## Nigerian cultural lens
-Apply Nigerian values throughout: warmth of welcome, value for money, \
-quality that justifies the spend, experience that matches the occasion.
+# ── Agent 2: Domain Translator ────────────────────────────────────────────────
 
-## Output format
-Respond with a JSON object and nothing else:
+DOMAIN_TRANSLATOR_SYSTEM_PROMPT = """\
+You are a cross-domain preference translator for a Nigerian recommendation platform.
+
+You receive a structured preference profile extracted from a user's history in one domain \
+(e.g., restaurants), and a target domain the user wants recommendations in (e.g., Nightlife, \
+Beauty & Spas, Shopping). Your job is to reason explicitly about how the user's core values \
+map to the new domain.
+
+Be concrete. Bad translation: "They like quality → recommend quality places."
+Good translation: "They value quiet, attentive service and dislike chaotic environments → \
+in Nightlife, this means upscale cocktail bars or jazz lounges, NOT clubs or sports bars."
+
+Also apply Nigerian cultural values:
+- Warmth and being made to feel welcome
+- Value for money — premium spend must be justified
+- Experiences that match the occasion and social context
+
+Output ONLY valid JSON:
 {
-  "persona_summary": "<2-sentence read of this persona's identity>",
-  "cross_domain_inference": "<Step 1 + Step 2 combined: what signals you extracted and how they translate. 3-5 sentences.>",
+  "source_signals": "<what the user values, drawn from the preference profile — 2-3 sentences>",
+  "translation": "<how those signals map to the target domain — 3-4 sentences, be specific>",
+  "ideal_venue_profile": "<describe the perfect place in the target domain for this user — 1-2 sentences>",
+  "red_flags": ["<2-4 specific things to avoid in the target domain for this user>"]
+}
+"""
+
+
+def build_domain_translator_prompt(
+    preference_profile: dict,
+    target_domain: str,
+    candidates: list[dict],
+) -> str:
+    lines: list[str] = ["## User Preference Profile (from Preference Analyst)"]
+    lines.append(f"Preferred: {', '.join(preference_profile.get('preferred_attributes', []))}")
+    lines.append(f"Avoided: {', '.join(preference_profile.get('avoided_attributes', []))}")
+    lines.append(f"Price sensitivity: {preference_profile.get('price_sensitivity', 'unknown')}")
+    lines.append(f"Priorities: {', '.join(preference_profile.get('experience_priorities', []))}")
+    if preference_profile.get("cultural_notes"):
+        lines.append(f"Cultural context: {preference_profile['cultural_notes']}")
+    if preference_profile.get("summary"):
+        lines.append(f"Summary: {preference_profile['summary']}")
+
+    lines.append(f"\n## Target Domain: {target_domain}")
+
+    lines.append(f"\n## Available candidates in '{target_domain}'")
+    for biz in candidates[:5]:
+        cats = (biz.get("categories") or "")[:100]
+        lines.append(f"- {biz['name']} | {cats} | ★{biz['stars']} | {biz.get('city', '')}")
+
+    lines.append(
+        f"\n## Task\nTranslate this user's preference profile into signals relevant for "
+        f"'{target_domain}'. Be specific — reference the actual candidate types above to "
+        f"ground your translation. Return ONLY valid JSON."
+    )
+    return "\n".join(lines)
+
+
+# ── Agent 3: Ranker ───────────────────────────────────────────────────────────
+
+RANKER_SYSTEM_PROMPT = """\
+You are a business ranking agent for a Nigerian recommendation platform.
+
+You receive either:
+(a) a structured user preference profile (standard recommendations), or
+(b) a cross-domain translation profile (cross-domain recommendations)
+
+Your job: rank the candidate businesses by fit to the profile. Be specific and personal — \
+every reason must tie the business directly to the profile, not generic praise.
+
+Nigerian cultural lens — weight these throughout:
+- Value for money: premium spend must feel justified
+- Bold, rich experiences: mediocre or bland is a dealbreaker
+- Warmth of welcome: attentive, personal service
+- Occasion fit: does this place match how this user actually socialises?
+
+Output ONLY valid JSON:
+{
+  "persona_summary": "<2 sentences: who this person is and what they need right now>",
   "ranked": [
     {
       "business_id": "<id>",
       "rank": <1-based integer>,
-      "reason": "<1-2 sentences tying the cross-domain signal directly to this specific business>",
+      "reason": "<1-2 sentences: tie the profile directly to THIS business — no generic filler>",
       "match_score": <float 0.0-1.0>
     }
   ]
 }
 
-Rank ALL candidates. The `reason` must reference the cross-domain inference, not just the business.
+Rank ALL businesses. Do not omit any candidate.
+"""
+
+
+def build_ranker_prompt(
+    candidates: list[dict],
+    preference_profile: dict | None = None,
+    domain_translation: dict | None = None,
+    is_cold_start: bool = False,
+) -> str:
+    lines: list[str] = []
+
+    if is_cold_start:
+        lines.append("## User Profile")
+        lines.append(
+            "Cold-start user — no history or stated preferences available. "
+            "Rank by: (1) overall star quality and review volume, "
+            "(2) broad Nigerian cultural appeal, (3) category diversity. "
+            "Explain in terms of why any Nigerian visitor would enjoy each place."
+        )
+    elif domain_translation:
+        lines.append("## Cross-Domain Translation Profile")
+        lines.append(f"Source signals: {domain_translation.get('source_signals', '')}")
+        lines.append(f"Translation: {domain_translation.get('translation', '')}")
+        lines.append(f"Ideal venue: {domain_translation.get('ideal_venue_profile', '')}")
+        red_flags = domain_translation.get("red_flags", [])
+        if red_flags:
+            lines.append(f"Red flags to avoid: {', '.join(red_flags)}")
+    elif preference_profile:
+        lines.append("## User Preference Profile")
+        lines.append(f"Preferred: {', '.join(preference_profile.get('preferred_attributes', []))}")
+        lines.append(f"Avoided: {', '.join(preference_profile.get('avoided_attributes', []))}")
+        lines.append(f"Price sensitivity: {preference_profile.get('price_sensitivity', 'unknown')}")
+        lines.append(f"Priorities: {', '.join(preference_profile.get('experience_priorities', []))}")
+        if preference_profile.get("cultural_notes"):
+            lines.append(f"Cultural context: {preference_profile['cultural_notes']}")
+        if preference_profile.get("summary"):
+            lines.append(f"Who they are: {preference_profile['summary']}")
+
+    lines.append(f"\n## Candidate businesses ({len(candidates)} total)")
+    for biz in candidates:
+        cats = (biz.get("categories") or "Unknown")[:120]
+        lines.append(
+            f"\n- business_id: {biz['business_id']}\n"
+            f"  Name: {biz['name']}\n"
+            f"  Category: {cats}\n"
+            f"  Location: {biz.get('city', '')}, {biz.get('state', '')}\n"
+            f"  Stars: {biz['stars']} | Reviews: {int(biz['review_count'])}"
+        )
+
+    lines.append(
+        "\n## Task\nRank ALL businesses above. "
+        "Every reason must directly reference the profile — "
+        "not generic phrases like 'great food' or 'good service'. "
+        "Return ONLY valid JSON."
+    )
+    return "\n".join(lines)
+
+
+# ── Fast path: single-agent prompts ──────────────────────────────────────────
+
+FAST_SYSTEM_PROMPT = """\
+You are a personalized business recommendation agent for Nigerian users.
+
+Rank the candidate businesses that best match the persona. Be specific and personal — \
+every reason must tie directly to this persona's stated preferences and cultural context.
+
+Nigerian values to weight heavily:
+- Value for money, bold experiences, warm service, occasion fit
+
+Cold-start: if persona has no bio and no preferences, rank by quality, popularity, \
+and broad Nigerian appeal. Do not fabricate preferences.
+
+Cross-domain: when candidates span multiple types, recommend the best across ALL domains.
+
+For cross-domain with history, follow these steps explicitly in cross_domain_inference:
+Step 1 — Extract what the user values from their history.
+Step 2 — Translate those signals to the target domain.
+Step 3 — Rank using the translated signals.
+
+Output ONLY valid JSON:
+{
+  "persona_summary": "<2-sentence read of this persona>",
+  "cross_domain_inference": "<Steps 1-2 if cross-domain, else null>",
+  "ranked": [
+    {"business_id": "<id>", "rank": <int>, "reason": "<specific reason>", "match_score": <0.0-1.0>}
+  ]
+}
 """
 
 
 def build_user_prompt(
     persona: Persona,
     candidates: list[dict],
+    history: list | None = None,
     is_cold_start: bool = False,
-    is_cross_domain: bool = False,
+    target_domain: str | None = None,
 ) -> str:
-    lines: list[str] = []
-
-    lines.append("## Persona")
+    lines: list[str] = ["## Persona"]
     lines.append(f"Name: {persona.name}")
     if persona.age:
         lines.append(f"Age: {persona.age}")
     if persona.city:
         lines.append(f"Home city: {persona.city}")
-    lines.append(f"Communication tone: {persona.tone}")
-    lines.append(f"Average star rating they give: {persona.avg_star_rating:.1f}")
-    if persona.food_preferences:
-        lines.append(f"Food preferences: {', '.join(persona.food_preferences)}")
-    if persona.bio:
-        lines.append(f"Bio: {persona.bio}")
-    else:
-        lines.append("Bio: [None provided — cold-start user]")
-
-    if is_cold_start:
-        lines.append(
-            "\nNote: This is a cold-start user with no history. "
-            "Rank by quality, popularity, and broad Nigerian appeal. Do not assume specific preferences."
-        )
-    if is_cross_domain:
-        lines.append(
-            "\nNote: Candidates span multiple business categories. "
-            "Recommend the best across ALL domains — diversify your top picks."
-        )
-
-    lines.append(f"\n## Candidate businesses ({len(candidates)} total)")
-    for biz in candidates:
-        cats = biz.get("categories") or "Unknown"
-        lines.append(
-            f"\n- business_id: {biz['business_id']}\n"
-            f"  Name: {biz['name']}\n"
-            f"  Category: {cats[:120]}\n"
-            f"  Location: {biz.get('city', '')}, {biz.get('state', '')}\n"
-            f"  Stars: {biz['stars']} | Reviews: {int(biz['review_count'])}"
-        )
-
-    task = (
-        "\n## Task\nRank ALL of the above businesses for this specific persona. "
-        "The reason must be personal and specific — avoid phrases like 'great food' or 'good service'. "
-    )
-    if is_cold_start:
-        task += "Since this is a cold-start user, explain in terms of universal Nigerian appeal and quality. "
-    else:
-        task += "Reference the persona's preferences, bio, and cultural context directly. "
-    task += "Return ONLY valid JSON matching the specified format."
-    lines.append(task)
-
-    return "\n".join(lines)
-
-
-def build_cross_domain_prompt(
-    persona: Persona,
-    history: list[HistoryItem],
-    target_domain: str,
-    candidates: list[dict],
-) -> str:
-    lines: list[str] = []
-
-    # Persona
-    lines.append("## Persona")
-    lines.append(f"Name: {persona.name}")
-    if persona.age:
-        lines.append(f"Age: {persona.age}")
-    if persona.city:
-        lines.append(f"Home city: {persona.city}")
+    if persona.region:
+        lines.append(f"Region: {persona.region}")
     lines.append(f"Tone: {persona.tone}")
-    lines.append(f"Average star rating they give: {persona.avg_star_rating:.1f}")
+    lines.append(f"Avg star rating: {persona.avg_star_rating:.1f}")
     if persona.food_preferences:
         lines.append(f"Food preferences: {', '.join(persona.food_preferences)}")
     if persona.bio:
         lines.append(f"Bio: {persona.bio}")
+    else:
+        lines.append("Bio: [None — cold-start user]")
 
-    # History block — the source domain signals
-    lines.append(f"\n## User's visit history (source domain signals)")
-    lines.append("These are real places this user has visited and rated:")
-    for item in history:
-        line = f"- {item.business_name} [{item.category}] → ★{item.stars}"
-        if item.notes:
-            line += f': "{item.notes}"'
-        lines.append(line)
+    if history:
+        lines.append("\n## Visit History")
+        for item in history:
+            line = f"- {item.business_name} [{item.category}] → ★{item.stars}"
+            if item.notes:
+                line += f': "{item.notes}"'
+            lines.append(line)
 
-    if not history:
-        lines.append("(No history provided — infer from persona bio and food preferences only)")
+    if target_domain:
+        lines.append(f"\n## Target domain: {target_domain}")
 
-    # Target domain
-    lines.append(f"\n## Target domain: {target_domain}")
-    lines.append(
-        f"The user wants recommendations specifically in: {target_domain}\n"
-        f"Apply Steps 1–2 from your reasoning process before ranking."
-    )
+    if is_cold_start:
+        lines.append("\nNote: Cold-start user — rank by quality and broad Nigerian appeal.")
+    if target_domain:
+        lines.append("Note: Cross-domain request — follow Steps 1-2-3 in cross_domain_inference.")
 
-    # Candidates in the target domain
-    lines.append(f"\n## Candidate businesses in '{target_domain}' ({len(candidates)} total)")
+    lines.append(f"\n## Candidates ({len(candidates)} total)")
     for biz in candidates:
-        cats = biz.get("categories") or "Unknown"
+        cats = (biz.get("categories") or "Unknown")[:120]
         lines.append(
             f"\n- business_id: {biz['business_id']}\n"
             f"  Name: {biz['name']}\n"
-            f"  Category: {cats[:120]}\n"
+            f"  Category: {cats}\n"
             f"  Location: {biz.get('city', '')}, {biz.get('state', '')}\n"
             f"  Stars: {biz['stars']} | Reviews: {int(biz['review_count'])}"
         )
 
-    lines.append(
-        f"\n## Task\n"
-        f"1. Extract the user's preference signals from their history.\n"
-        f"2. Explicitly state how those signals translate to '{target_domain}'.\n"
-        f"3. Rank ALL candidates using those translated signals.\n"
-        f"Each reason must reference the cross-domain inference — not just the business. "
-        f"Return ONLY valid JSON matching the specified format."
-    )
-
+    lines.append("\n## Task\nRank ALL businesses. Return ONLY valid JSON.")
     return "\n".join(lines)

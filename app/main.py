@@ -83,6 +83,7 @@ def recommend(request: RecommendRequest):
             persona=request.persona,
             filters=request.filters,
             history=request.history,
+            use_agent_pipeline=request.use_agent_pipeline,
         )
     except ValueError as e:
         raise HTTPException(status_code=500, detail=str(e))
