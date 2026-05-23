@@ -176,7 +176,7 @@ Returns a ranked list of personalised business recommendations. Supports cold-st
     "city": "Philadelphia",
     "state": "PA",
     "min_stars": 3.5,
-    "max_results": 5
+    "max_results": 10
   },
   "history": [
     { "business_name": "Amara Kitchen", "category": "Nigerian", "stars": 5, "notes": "Bold pepper soup, felt at home" },

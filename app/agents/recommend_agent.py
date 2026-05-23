@@ -232,7 +232,7 @@ def get_recommendations(
             state=filters.state,
             categories=[target],
             min_stars=filters.min_stars,
-            limit=20,
+            limit=30,
         )
         if not candidates:
             candidates = loader.search_businesses(
@@ -240,7 +240,7 @@ def get_recommendations(
                 state=filters.state,
                 categories=[target],
                 min_stars=1.0,
-                limit=20,
+                limit=30,
             )
     else:
         candidates = loader.search_businesses(
@@ -248,7 +248,7 @@ def get_recommendations(
             state=filters.state,
             categories=filters.categories or None,
             min_stars=filters.min_stars,
-            limit=20,
+            limit=30,
             diverse=not filters.categories,
         )
         if not candidates:
@@ -256,7 +256,7 @@ def get_recommendations(
                 city=filters.city,
                 state=filters.state,
                 min_stars=filters.min_stars,
-                limit=20,
+                limit=30,
                 diverse=True,
             )
 
