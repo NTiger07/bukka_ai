@@ -243,10 +243,11 @@ def get_recommendations(
                 limit=30,
             )
     else:
+        default_categories = filters.categories or ["Restaurants", "Food"]
         candidates = loader.search_businesses(
             city=filters.city,
             state=filters.state,
-            categories=filters.categories or None,
+            categories=default_categories,
             min_stars=filters.min_stars,
             limit=30,
             diverse=not filters.categories,
@@ -255,6 +256,7 @@ def get_recommendations(
             candidates = loader.search_businesses(
                 city=filters.city,
                 state=filters.state,
+                categories=default_categories,
                 min_stars=filters.min_stars,
                 limit=30,
                 diverse=True,

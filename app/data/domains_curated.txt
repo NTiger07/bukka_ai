@@ -1,0 +1,33 @@
+# 30 curated non-food domains for target_domain
+# Use any of these as the target_domain value in the /recommend request.
+
+Nightlife
+Beauty & Spas
+Shopping
+Fitness & Instruction
+Health & Medical
+Hotels & Travel
+Arts & Entertainment
+Fashion
+Skin Care
+Hair Salons
+Nail Salons
+Massage
+Day Spas
+Gyms
+Active Life
+Venues & Event Spaces
+Event Planning & Services
+Pet Services
+Flowers & Gifts
+Music Venues
+Art Galleries
+Jewelry
+Tattoo
+Yoga
+Performing Arts
+Cinema
+Museums
+Dance Studios
+Bookstores
+Wedding Planning
