@@ -167,13 +167,13 @@ Output ONLY valid JSON:
     {
       "business_id": "<id>",
       "rank": <1-based integer>,
-      "reason": "<1-2 sentences: tie the profile directly to THIS business — no generic filler>",
+      "reason": "<1 sentence max: tie the profile directly to THIS business — no generic filler>",
       "match_score": <float 0.0-1.0>
     }
   ]
 }
 
-Rank ALL businesses. Do not omit any candidate.
+Rank ALL businesses but return ONLY the TOP 5 by fit. Keep every reason to ONE sentence — be precise, not verbose.
 """
 
 
@@ -225,8 +225,8 @@ def build_ranker_prompt(
 
     lines.append(
         "\n## Task\nRank ALL businesses above. "
-        "Every reason must directly reference the profile — "
-        "not generic phrases like 'great food' or 'good service'. "
+        "Each reason must be ONE sentence only — directly reference the profile. "
+        "No generic phrases. No extra prose outside the JSON. "
         "Return ONLY valid JSON."
     )
     return "\n".join(lines)
@@ -253,14 +253,16 @@ Step 1 — Extract what the user values from their history.
 Step 2 — Translate those signals to the target domain.
 Step 3 — Rank using the translated signals.
 
-Output ONLY valid JSON:
+Output ONLY valid JSON — no prose, no markdown:
 {
-  "persona_summary": "<2-sentence read of this persona>",
-  "cross_domain_inference": "<Steps 1-2 if cross-domain, else null>",
+  "persona_summary": "<2 sentences: who this person is and what they need>",
+  "cross_domain_inference": "<1-2 sentences: how their restaurant preferences translate to the target domain — or null if not cross-domain>",
   "ranked": [
-    {"business_id": "<id>", "rank": <int>, "reason": "<specific reason>", "match_score": <0.0-1.0>}
+    {"business_id": "<id>", "rank": <int>, "reason": "<1 sentence max tying this business to the persona>", "match_score": <0.0-1.0>}
   ]
 }
+
+Return ONLY the TOP 5 ranked results. One sentence per reason. No extra text outside the JSON.
 """
 
 
@@ -315,5 +317,5 @@ def build_user_prompt(
             f"  Stars: {biz['stars']} | Reviews: {int(biz['review_count'])}"
         )
 
-    lines.append("\n## Task\nRank ALL businesses. Return ONLY valid JSON.")
+    lines.append("\n## Task\nRank the candidates. Return ONLY the TOP 5 by fit. One sentence per reason. Return ONLY valid JSON.")
     return "\n".join(lines)

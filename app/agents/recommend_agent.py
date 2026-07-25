@@ -15,7 +15,7 @@ import logging
 import os
 import time
 
-import anthropic
+from openai import OpenAI
 
 from app.data.yelp_loader import get_loader
 from app.models import (
@@ -29,13 +29,16 @@ from app.prompts import recommend_prompts
 
 logger = logging.getLogger(__name__)
 
-_client: anthropic.Anthropic | None = None
+_client: OpenAI | None = None
 
 
-def _get_client() -> anthropic.Anthropic:
+def _get_client() -> OpenAI:
     global _client
     if _client is None:
-        _client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        _client = OpenAI(
+            base_url="https://integrate.api.nvidia.com/v1",
+            api_key=os.getenv("NVIDIA_API_KEY"),
+        )
     return _client
 
 
@@ -44,23 +47,26 @@ def _is_cold_start(persona: Persona, history: list[HistoryItem]) -> bool:
 
 
 def _call_claude(system: str, user: str, max_tokens: int = 1024) -> str:
-    """Call Claude with prompt caching on the system prompt. Returns stripped text."""
-    model = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
+    """Call the LLM with system + user prompt. Returns stripped text."""
+    model = os.getenv("NVIDIA_MODEL", "qwen/qwen3-235b-a22b")
     client = _get_client()
-    message = client.messages.create(
+    message = client.chat.completions.create(
         model=model,
         max_tokens=max_tokens,
-        system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
-        messages=[{"role": "user", "content": user}],
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
     )
-    raw = message.content[0].text.strip()
+    raw = message.choices[0].message.content.strip()
     if raw.startswith("```"):
         raw = raw.split("```")[1]
         if raw.startswith("json"):
             raw = raw[4:]
         raw = raw.strip()
-    if message.stop_reason != "end_turn":
-        logger.warning("Agent stopped with reason=%s — may be truncated", message.stop_reason)
+    if message.choices[0].finish_reason != "stop":
+        logger.warning("Agent stopped with reason=%s — may be truncated", message.choices[0].finish_reason)
     return raw
 
 
@@ -76,7 +82,7 @@ def _run_preference_analyst(
     raw = _call_claude(
         recommend_prompts.PREFERENCE_ANALYST_SYSTEM_PROMPT,
         user_prompt,
-        max_tokens=512,
+        max_tokens=1024,
     )
     try:
         return json.loads(raw)
@@ -100,7 +106,7 @@ def _run_domain_translator(
     raw = _call_claude(
         recommend_prompts.DOMAIN_TRANSLATOR_SYSTEM_PROMPT,
         user_prompt,
-        max_tokens=512,
+        max_tokens=1024,
     )
     try:
         return json.loads(raw)
@@ -129,7 +135,7 @@ def _run_ranker(
     raw = _call_claude(
         recommend_prompts.RANKER_SYSTEM_PROMPT,
         user_prompt,
-        max_tokens=4096,
+        max_tokens=6000,
     )
     try:
         parsed = json.loads(raw)
@@ -232,7 +238,7 @@ def get_recommendations(
             state=filters.state,
             categories=[target],
             min_stars=filters.min_stars,
-            limit=30,
+            limit=filters.max_results * 3,
         )
         if not candidates:
             candidates = loader.search_businesses(
@@ -240,7 +246,7 @@ def get_recommendations(
                 state=filters.state,
                 categories=[target],
                 min_stars=1.0,
-                limit=30,
+                limit=filters.max_results * 3,
             )
     else:
         default_categories = filters.categories or ["Restaurants", "Food"]
@@ -249,7 +255,7 @@ def get_recommendations(
             state=filters.state,
             categories=default_categories,
             min_stars=filters.min_stars,
-            limit=30,
+            limit=filters.max_results * 3,
             diverse=not filters.categories,
         )
         if not candidates:
@@ -258,7 +264,7 @@ def get_recommendations(
                 state=filters.state,
                 categories=default_categories,
                 min_stars=filters.min_stars,
-                limit=30,
+                limit=filters.max_results * 3,
                 diverse=True,
             )
 

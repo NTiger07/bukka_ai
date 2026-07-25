@@ -63,7 +63,7 @@ class RecommendFilters(BaseModel):
     state: str | None = None
     categories: list[str] = Field(default_factory=list)
     min_stars: float = Field(default=3.0, ge=1.0, le=5.0)
-    max_results: int = Field(default=10, ge=1, le=10)
+    max_results: int = Field(default=5, ge=1, le=5)
     # Cross-domain: set this to recommend in a different domain than the user's history
     target_domain: str | None = None       # e.g. "Spas", "Nightlife", "Shopping", "Arts & Entertainment"
 

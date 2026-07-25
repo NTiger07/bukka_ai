@@ -15,7 +15,7 @@ import logging
 import os
 import time
 
-import anthropic
+from openai import OpenAI
 
 from app.data.nigerian_examples import get_examples_by_region, get_examples_by_stars
 from app.data.yelp_loader import get_loader
@@ -24,13 +24,16 @@ from app.prompts import review_prompts
 
 logger = logging.getLogger(__name__)
 
-_client: anthropic.Anthropic | None = None
+_client: OpenAI | None = None
 
 
-def _get_client() -> anthropic.Anthropic:
+def _get_client() -> OpenAI:
     global _client
     if _client is None:
-        _client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        _client = OpenAI(
+            base_url="https://integrate.api.nvidia.com/v1",
+            api_key=os.getenv("NVIDIA_API_KEY"),
+        )
     return _client
 
 
@@ -64,26 +67,22 @@ def generate_review(
         examples=examples,
     )
 
-    model = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
+    model = os.getenv("NVIDIA_MODEL", "qwen/qwen3-235b-a22b")
     client = _get_client()
 
     t0 = time.perf_counter()
-    message = client.messages.create(
+    message = client.chat.completions.create(
         model=model,
         max_tokens=1024,
-        system=[
-            {
-                "type": "text",
-                "text": review_prompts.SYSTEM_PROMPT,
-                # Cache the static system prompt — it never changes between requests
-                "cache_control": {"type": "ephemeral"},
-            }
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": review_prompts.SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
         ],
-        messages=[{"role": "user", "content": user_prompt}],
     )
     elapsed_ms = int((time.perf_counter() - t0) * 1000)
 
-    raw = message.content[0].text.strip()
+    raw = message.choices[0].message.content.strip()
 
     # Strip markdown code fences if present
     if raw.startswith("```"):
