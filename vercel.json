@@ -16,7 +16,8 @@
     }
   ],
   "env": {
-    "CLAUDE_MODEL": "claude-haiku-4-5-20251001",
-    "REVIEW_SAMPLE_LIMIT": "10000"
+    "NVIDIA_MODEL": "nvidia/nemotron-3-ultra-550b-a55b",
+    "REVIEW_SAMPLE_LIMIT": "10000",
+    "ALLOWED_ORIGINS": "https://bukkaai.vercel.app"
   }
 }
