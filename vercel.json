@@ -15,9 +15,19 @@
       "dest": "app/main.py"
     }
   ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Credentials", "value": "true" },
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET,OPTIONS,PATCH,DELETE,POST,PUT" },
+        { "key": "Access-Control-Allow-Headers", "value": "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization" }
+      ]
+    }
+  ],
   "env": {
     "NVIDIA_MODEL": "nvidia/nemotron-3-ultra-550b-a55b",
-    "REVIEW_SAMPLE_LIMIT": "10000",
-    "ALLOWED_ORIGINS": "https://bukkaai.vercel.app"
+    "REVIEW_SAMPLE_LIMIT": "10000"
   }
 }
