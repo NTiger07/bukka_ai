@@ -225,6 +225,7 @@ def get_recommendations(
     use_agent_pipeline: bool = False,
 ) -> RecommendResponse:
     history = history or []
+    filters.max_results = 5  # Always enforce 5 results max regardless of frontend input
     loader = get_loader()
     cold_start = _is_cold_start(persona, history)
     t0 = time.perf_counter()
